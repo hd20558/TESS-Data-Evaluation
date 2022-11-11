@@ -9,11 +9,26 @@ import lightkurve.periodogram
 import matplotlib.pyplot as plt
 import numpy as np
 import math
+import astropy.units
+from astroquery.mast import Catalogs
 
 figure_size = (15,5)
 BINNING = 0.05 #days
 #binning_flag = False
 detailed_analysis_threshold = 10
+FOURIER_TERMS = 15
+
+BIN =               True
+FLUX_ERRORS =       True
+LOMB_SCARGLE =      True
+BLS =               True
+FOLDING =           True
+INSPECT_DAY =       True
+FLATTEN =           True
+FLATTEN_BIN =       True
+FLATTEN_SEQ_BIN =   True
+COMPONENT_MASK =    True
+
 #y_limits = False #[0.95,1.05] #False
                 #       1               2           3               4           5               6           7               8           9           10          11              12              13          14              15              16              17          18          19              20              21          22              23          24          25          26          27              28          29              30          31              32          33
 observations = [[274039311,31],[126947245,1],[341849173,7],[441461124,2],[273985862,1],[266980320,1],[301407485,31],[9967126,4],[120896927,4],[231702397,1],[279614617,9],[103633672,14],[413248763,8],[441791294,14],[20291794,23],[321103619,20],[110996418,10],[149950920,21],[55525572,4],[207468071,23],[183596242,3],[350618622,2],[144539611,4],[11465798,9],[1030783,4],[7809321,4],[20448500,9],[23609565,9],[14336130,20],[441420236,1],[136916387,12],[169226822,9],[160708862,38]]
@@ -25,7 +40,7 @@ desired_indexes = [6,10,15,22,29]
 initial_masks = [[441420236,[0.7,   0.9,
                      1.2,   1.35,
                      1.5,   1.55,
-                     2.55   ,2.65,
+                     2.55,  2.65,
                      2.75,  2.85,
                      3.3,   3.5,
                      4.15,  4.225,
@@ -50,14 +65,21 @@ initial_masks = [[441420236,[0.7,   0.9,
                      17.4,  18.0,
                      21.05, 21.3]],
          [321103619,[20.4,  20.6]],
-         [144539611,[6.35,6.6,
-                     10.325,10.45,
-                     10.875,11.0,
-                     14.05,14.2,
-                     14.3,14.5,
-                     14.6,14.95,
-                     17.8,18.0,
-                     22.35,23.0]],
+         [144539611,[6.35,  6.6,                
+                     10.0,  12.5,                   #masks over the region between malfunction and Earth transmission, specifically this line
+                     14.05, 14.2,   
+                     14.3,  14.5,
+                     14.6,  14.95,
+                     17.8,  18.0,
+                     22.35, 23.0]],
+                    #[6.35,  6.6,
+                     #10.325,10.45,
+                     #10.875,11.0,
+                     #14.05, 14.2,                  #mask that keeps in the data between telescope malfunction and Earth transmission
+                     #14.3,  14.5,
+                     #14.6,  14.95,
+                     #17.8,  18.0,
+                     #22.35, 23.0]
          [301407485,[]]]
                     #[0.5,   0.8,
                     #1.8,   2.175,
@@ -77,52 +99,113 @@ initial_masks = [[441420236,[0.7,   0.9,
                     #23.15, 23.45,
                     #24.4,  24.8]
                     
-secondary_masks = [[441420236,[[0.0,1.5,
-                                4.5,6.3,
-                                9.3,11.25,
-                                14.25,16.1,         #masking the small peaks
-                                19.1,20.9,
-                                24.0,25.75],
-                               [1.5,4.5,
-                                6.3,9.3,
-                                11.25,14.25,
-                                16.1,19.1,          #masking the big peaks
-                                20.9,24.0,  
-                                25.75,28]]],
+secondary_masks = [
+         [441420236,[]],                                     # [0.0,      1.5,
+                                                             #  4.5,      6.3,
+                                                             #  9.3,      11.25,
+                                                             #  14.25,    16.1,         #masking the small peaks
+                                                             #  19.1,     20.9,
+                                                             #  24.0,     25.75],
+                                                             # [1.5,      4.5,
+                                                             #  6.3,      9.3,
+                                                             #  11.25,    14.25,
+                                                             #  16.1,     19.1,          #masking the big peaks
+                                                             #  20.9,     24.0,  
+                                                             #  25.75,    28.0]
+         
          [279614617,[]],
+         
          [321103619,[]],
-         [144539611,[[1.2,1.4,
-                      3.175,3.35,
-                      5.175,5.35,
-                      7.15,7.35,
-                      11.15,11.35,
-                      15.15,15.3,                   #masking both eclipses
-                      17.12,17.275,
-                      19.1,19.3,
-                      21.1,21.275,
-                      23.075,23.25,
-                      25.0,25.5],
-                     [1.2,1.4,
-                      5.175,5.35,
-                      17.12,17.275,                         #masking secondary eclipses
-                      21.1,21.275,
-                      25.0,25.5],
-                     [3.175,3.35,
-                      7.15,7.35,
-                      11.15,11.35,                          #masking primary eclipses
-                      15.15,15.3,
-                      19.1,19.3,
-                      23.075,23.25]]],
-         [301407485,[[0.5,0.75,
-                      1.85,2.15,
-                      3.175,3.45,
-                      4.475,4.775,
-                      5.8,6.1,
-                      7.15,7.45],
-                     [
-                         ],
-                     [
-                         ]]]]
+         
+         [144539611,[[1.2,      1.4,
+                      3.175,    3.35,
+                      5.175,    5.35,
+                      7.15,     7.35,
+                      11.15,    11.35,
+                      15.15,    15.3,                   #masking both eclipses
+                      17.12,    17.275,
+                      19.1,     19.3,
+                      21.1,     21.275,
+                      23.075,   23.25,
+                      25.0,     25.5],
+                     [1.2,      1.4,
+                      5.175,    5.35,
+                      17.12,    17.275,                 #masking primary eclipses
+                      21.1,     21.275,
+                      25.0,     25.5],
+                     [0.0,      1.2,
+                      1.4,      5.175,
+                      5.35,     17.12,                  #anti-masking primary eclipses
+                      17.275,   21.1,
+                      21.275,   25.0,
+                      25.5,     28.0],
+                     [3.175,    3.35,
+                      7.15,     7.35,
+                      11.15,    11.35,                  #masking secondary eclipses
+                      15.15,    15.3,
+                      19.1,     19.3,
+                      23.075,   23.25],
+                     [0.0,      3.175,
+                      3.35,     7.15,
+                      7.35,     11.15,
+                      11.35,    15.15,                  #anti-masking secondary eclipses
+                      15.3,     19.1,
+                      19.3,     23.075,
+                      23.25,    28.0]]],
+         
+         [301407485,[[0.5,      0.85,
+                      1.75,     2.15,
+                      3.175,    3.45,
+                      4.475,    4.775,
+                      5.8,      6.1,
+                      7.15,     7.45,
+                      8.475,    8.8,
+                      9.8,      10.15,
+                      11.15,    11.5,                   #masking both eclipses
+                      15.1,     15.45,
+                      16.45,    16.8,
+                      17.8,     18.15,
+                      19.15,    19.45,
+                      20.45,    20.8,
+                      21.8,     22.1,
+                      23.14,    23.45,
+                      24.5,     24.8],
+                     [1.75,     2.15,
+                      4.475,    4.775,
+                      7.15,     7.45,
+                      9.8,      10.15,                  #masking primary eclipses
+                      15.1,     15.45,
+                      17.8,     18.15,
+                      20.45,    20.8,
+                      23.14,    23.45],
+                     [0.0,      1.75,
+                      2.15,     4.475,
+                      4.775,    7.15,
+                      7.45,     9.8,
+                      10.15,    15.1,
+                      15.45,    17.8,                   #anti-masking primary eclipses
+                      18.15,    20.45,
+                      20.8,     23.14,
+                      23.45,    28.0],
+                     [0.5,      0.85,
+                      3.175,    3.45,
+                      5.8,      6.1,
+                      8.475,    8.8,
+                      11.15,    11.5,                   #masking secondary eclipses
+                      16.45,    16.8,
+                      19.15,    19.45,
+                      21.8,     22.1,
+                      24.5,     24.8],
+                     [0.0,      0.5,
+                      0.85,     3.175,
+                      3.45,     5.8,
+                      6.1,      8.475,
+                      8.8,      11.15,
+                      11.5,     16.45,
+                      16.8,     19.15,
+                      19.45,    21.8,
+                      22.1,     24.5,
+                      24.8,     28.0]]]]
 
 #analyse only the IDs at the given indexes
 observations_to_analyse = [observations[desired_index] for desired_index in desired_indexes]
@@ -141,11 +224,33 @@ for observation_index in range(len(observations_to_analyse)):
     lc = search_result.download()
     print(target_identifier, 'sector', sector_number, 'lightcurve downloaded')
     
+    
+    
+    
+    
+    TIC_info = Catalogs.query_criteria(catalog='TIC', ID=target_identifier[4:])
+    
+    print(TIC_info.colnames)
+    print(TIC_info['objType'])
+    print(TIC_info['TESSflag'])
+    print(TIC_info['lumclass'])
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     #print(lc.keys()) # This will tell you what objects are in the light curve file we have just downloaded
     #print('---------')
     #print(lc.meta.keys()) # This will tell you other keys that are contained in the metadat of the file
     
     # We now need to normalize our light curve so we can plot it and examine the target
+    lc_normalisation = float(np.median(lc.flux) * astropy.units.s / astropy.units.electron)
     lc = lc.normalize()
     print(target_identifier, 'sector', sector_number, 'lightcurve normalised')
     
@@ -184,22 +289,30 @@ for observation_index in range(len(observations_to_analyse)):
                 mask_index -= 2
     else:
         mask_label = ", Unmasked"
-    fig = plt.figure(figsize=figure_size)
-    plt.errorbar(mjd_time, lc.flux, lc.flux_err.data, fmt='.', ecolor='LightGrey',label='Unbinned Data')
+    
     
     
     lc_bin_flag = False
-    if input('Bin Data? (y/[n]): ') != '':
-        lc_bin_flag = True
-        lc_bin = lc.bin(time_bin_size = BINNING) # Default time is in days
-        mjd_time_binned = lc_bin.time.mjd - lc_bin.time[0].mjd
-        print(target_identifier, 'sector', sector_number, 'lightcurve data binned')
-        plt.errorbar(mjd_time_binned, lc_bin.flux, lc_bin.flux_err.data, fmt='.', ecolor='green',label='Binned Data')
-        #print(target_identifier, 'sector', sector_number, 'lightcurve binned data plotted')
-        plt.title('{0}, Sector {1}, Binning {2} days{3}'.format(target_identifier,sector_number,BINNING,mask_label))
-        plt.legend()
-    else:
-        plt.title('{0}, Sector {1}{2}'.format(target_identifier,sector_number,mask_label))
+    if BIN:
+        bin_input = input('Bin Data? (y/[n]): ')
+        if bin_input == 's':
+            continue
+        
+        fig = plt.figure(figsize=figure_size)
+        plt.errorbar(mjd_time, lc.flux, lc.flux_err.data, fmt='.', ecolor='LightGrey',label='Unbinned Data')
+        
+        if bin_input != '':
+            lc_bin_flag = True
+            lc_bin = lc.bin(time_bin_size = BINNING) # Default time is in days
+            mjd_time_binned = lc_bin.time.mjd - lc_bin.time[0].mjd
+            print(target_identifier, 'sector', sector_number, 'lightcurve data binned')
+            plt.errorbar(mjd_time_binned, lc_bin.flux, lc_bin.flux_err.data, fmt='.', ecolor='green',label='Binned Data')
+            #print(target_identifier, 'sector', sector_number, 'lightcurve binned data plotted')
+            plt.title('{0}, Sector {1}, Binning {2} days{3}'.format(target_identifier,sector_number,BINNING,mask_label))
+            plt.legend()
+        else:
+            plt.title('{0}, Sector {1}{2}'.format(target_identifier,sector_number,mask_label))
+
     plt.xlabel('Time [days]')
     plt.ylabel('Normalized Flux')
     #if y_limits != False:
@@ -221,53 +334,112 @@ for observation_index in range(len(observations_to_analyse)):
     
     
     #plot the errors on the flux with time rather than the actual flux value, kinda like a residual?
-    if input('Plot errors on flux? (y/[n]): ') != '':
-        fig = plt.figure(figsize=figure_size)
-        plt.plot(mjd_time_binned,lc_bin.flux_err)
-        plt.xlabel('Time [days]')
-        plt.ylabel('Error on Normalised Flux Value')
-        plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-        #plt.savefig('{0}-Sector-{1}'.format(target_identifier,sector_number))
-        plt.show()
+    if FLUX_ERRORS:
+        if input('Plot errors on flux? (y/[n]): ') != '':
+            fig = plt.figure(figsize=figure_size)
+            plt.plot(mjd_time_binned,lc_bin.flux_err)
+            plt.xlabel('Time [days]')
+            plt.ylabel('Error on Normalised Flux Value')
+            plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+            #plt.savefig('{0}-Sector-{1}'.format(target_identifier,sector_number))
+            plt.show()
     
     
-    
-    if input('Plot Lomb-Scargle Periodogram? (y/[n]): ') != '':
-        fig = plt.figure(figsize=figure_size)
-        if lc_bin_flag != False:
-            ls_pg = lk.periodogram.LombScarglePeriodogram.from_lightcurve(lc_bin)
-            plt.plot(ls_pg.period, ls_pg.power, label='Binned Data')
-        else:
-            ls_pg = lk.periodogram.LombScarglePeriodogram.from_lightcurve(lc)
-            plt.plot(ls_pg.period, ls_pg.power, label='Unbinned Data')
+    if LOMB_SCARGLE:
+        if input('Plot Lomb-Scargle Periodogram? (y/[n]): ') != '':
+            period_lower_lim = 0.001#input('Minimum period to fit? (default 1 day): ')
+            # if period_lower_lim == '':
+            #     period_lower_lim = 1
+            # else:
+            #     period_lower_lim = float(period_lower_lim)
+            period_upper_lim = input('Maximum period to fit? (default 7 days): ')
+            if period_upper_lim == '':
+                period_upper_lim = 7
+            else:
+                period_upper_lim = float(period_upper_lim)
+                
+            linspaced_periods = np.linspace(period_lower_lim, period_upper_lim, 500)
             
-        ls_max_power_period = ls_pg.period_at_max_power
-        print(target_identifier, 'sector', sector_number, 'Lomb-Scargle periodogram generated')
-        
-        plt.xlabel('Period [Days]')
-        plt.xlim(0,10)
-        plt.ylabel('Lomb-Scargle Power')
-        plt.title('{0}, Sector {1} Lomb-Scargle Periodogram'.format(target_identifier,sector_number))
-        plt.legend()
-        plt.show()
+            fig = plt.figure(figsize=figure_size)
+            if lc_bin_flag != False:
+                ls_pg = lk.periodogram.LombScarglePeriodogram.from_lightcurve(lc_bin,period=linspaced_periods,nterms=FOURIER_TERMS,ls_method='chi2')
+                plt.plot(ls_pg.period, ls_pg.power, label='Binned Data')
+            else:
+                ls_pg = lk.periodogram.LombScarglePeriodogram.from_lightcurve(lc,period=linspaced_periods,nterms=FOURIER_TERMS,ls_method='chi2')
+                plt.plot(ls_pg.period, ls_pg.power, label='Unbinned Data')
+                
+            ls_max_power_period = ls_pg.period_at_max_power
+            print(target_identifier, 'sector', sector_number, 'Lomb-Scargle periodogram generated')
+            
+            plt.xlabel('Period [Days]')
+            plt.xlim(0,period_upper_lim)
+            plt.ylabel('Lomb-Scargle Power')
+            plt.title('{0}, Sector {1} Lomb-Scargle Periodogram with {2} Fourier Term(s)'.format(target_identifier,sector_number,FOURIER_TERMS))
+            plt.legend()
+            plt.show()
+            
+            if FOLDING:
+                period_vs_power = [ls_pg.period,ls_pg.power]
+                folding_input = input('Fold lightcurve about strongest period? (y/[n]): ')
+                if  folding_input == 'y':
+                    print(ls_max_power_period)
+                    #fig = plt.figure(figsize=figure_size)
+                    lc.fold(ls_max_power_period).scatter(label='Period: {0:.4g}'.format(ls_max_power_period))
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    plt.show()
+                elif folding_input != '':
+                    folding_period = float(folding_input)
+                    lc.fold(folding_period).scatter(label='Period: {0:.4g}'.format(folding_period))
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    plt.show()
+                        
+                        # fig = plt.figure(figsize=figure_size)
+                        # plt.errorbar(lc_fold.time.value, lc_fold.flux, lc_fold.flux_err.data, fmt='.', ecolor='green', label='Period: {0:.4g}'.format(bls_max_power_period))
+                        # plt.xlabel('Phase [JD]')
+                        # plt.ylabel('Normalised Flux')
+                        # plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                        # plt.legend()
+                        # plt.show() 
     
-    
-    if input('Plot BLS Periodogram? (y/[n]): ') != '':
-        fig = plt.figure(figsize=figure_size)
-        if lc_bin_flag != False:
-            bls_pg = lk.periodogram.BoxLeastSquaresPeriodogram.from_lightcurve(lc_bin)
-            plt.plot(bls_pg.period, bls_pg.power, label='Binned Data')
-        else:
-            bls_pg = lk.periodogram.BoxLeastSquaresPeriodogram.from_lightcurve(lc)
-            plt.plot(bls_pg.period, bls_pg.power, label='Unbinned Data')
-        bls_max_power_period = bls_pg.period_at_max_power
-        print(target_identifier, 'sector', sector_number, 'Box Least Squares periodogram generated')
-        
-        plt.xlabel('Period [Days]')
-        plt.ylabel('BLS Power')
-        plt.title('{0}, Sector {1} Box Least Squares Periodogram'.format(target_identifier,sector_number))
-        plt.legend()
-        plt.show()
+    if BLS:
+        if input('Plot BLS Periodogram? (y/[n]): ') != '':
+            fig = plt.figure(figsize=figure_size)
+            if lc_bin_flag != False:
+                bls_pg = lk.periodogram.BoxLeastSquaresPeriodogram.from_lightcurve(lc_bin)
+                plt.plot(bls_pg.period, bls_pg.power, label='Binned Data')
+            else:
+                bls_pg = lk.periodogram.BoxLeastSquaresPeriodogram.from_lightcurve(lc)
+                plt.plot(bls_pg.period, bls_pg.power, label='Unbinned Data')
+            bls_max_power_period = bls_pg.period_at_max_power
+            print(target_identifier, 'sector', sector_number, 'Box Least Squares periodogram generated')
+            
+            plt.xlabel('Period [Days]')
+            plt.ylabel('BLS Power')
+            plt.title('{0}, Sector {1} Box Least Squares Periodogram'.format(target_identifier,sector_number))
+            plt.legend()
+            plt.show()
+            
+            if FOLDING:
+                folding_input = input('Fold lightcurve about strongest period? (y/[n]): ')
+                if  folding_input == 'y':
+                    print(bls_max_power_period)
+                    #fig = plt.figure(figsize=figure_size)
+                    lc.fold(bls_max_power_period).scatter(label='Period: {0:.4g}'.format(bls_max_power_period))
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    plt.show()
+                elif folding_input != '':
+                    folding_period = float(folding_input)
+                    lc.fold(folding_period).scatter(label='Period: {0:.4g}'.format(folding_period))
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    plt.show()
+                    
+                    # fig = plt.figure(figsize=figure_size)
+                    # plt.errorbar(lc_fold.time.value, lc_fold.flux, lc_fold.flux_err.data, fmt='.', ecolor='green', label='Period: {0:.4g}'.format(bls_max_power_period))
+                    # plt.xlabel('Phase [JD]')
+                    # plt.ylabel('Normalised Flux')
+                    # plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    # plt.legend()
+                    # plt.show() 
     
     # if input('Plot Fourier Transform? (y/[n]): ') != '':
     #     sampling_rate_seconds = 1/120 #Hz, s^-1
@@ -303,188 +475,269 @@ for observation_index in range(len(observations_to_analyse)):
         # sample_rate = len(lc.flux) / duration
         # quit()
 
-
-    if input('Fold lightcurve about strongest frequency? (y/[n]): ') != '':
-        print(bls_max_power_period)
-        #fig = plt.figure(figsize=figure_size)
-        lc.fold(bls_max_power_period).scatter(label='Period: {0:.4g}'.format(bls_max_power_period))
-        plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-        plt.show()
         
-        # fig = plt.figure(figsize=figure_size)
-        # plt.errorbar(lc_fold.time.value, lc_fold.flux, lc_fold.flux_err.data, fmt='.', ecolor='green', label='Period: {0:.4g}'.format(bls_max_power_period))
-        # plt.xlabel('Phase [JD]')
-        # plt.ylabel('Normalised Flux')
-        # plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-        # plt.legend()
-        # plt.show() 
     
+    if INSPECT_DAY:
+        if input('Inspect each day? (y/[n]): ') != '':
+            days = math.floor(lc.time[-1].mjd - lc.time[0].mjd)
+            day_counter = 0
+            previous_day_end_index = 0
+            for i in range(len(lc.time.mjd)):
+                current_time = lc.time[i].mjd - lc.time[0].mjd
+                if current_time >= day_counter + 1:
+                    plt.scatter(lc.time[previous_day_end_index:i].mjd - lc.time[0].mjd,lc.flux[previous_day_end_index:i])
+                    plt.title('{0}, Sector {1}, Day {2}-{3}'.format(target_identifier,sector_number,i,i+1))
+                    plt.xlabel('Time [days]')
+                    plt.ylabel('Normalized Flux')
+                    plt.show()
+                    day_counter += 1
+                    previous_day_end_index = i
+
     
-    if input('Inspect each day? (y/[n]): ') != '':
-        days = math.floor(lc.time[-1].mjd - lc.time[0].mjd)
-        day_counter = 0
-        previous_day_end_index = 0
-        for i in range(len(lc.time.mjd)):
-            current_time = lc.time[i].mjd - lc.time[0].mjd
-            if current_time >= day_counter + 1:
-                plt.scatter(lc.time[previous_day_end_index:i].mjd - lc.time[0].mjd,lc.flux[previous_day_end_index:i])
-                plt.title('{0}, Sector {1}, Day {2}-{3}'.format(target_identifier,sector_number,i,i+1))
+    if FLATTEN:
+        if input('Flatten light curve? (y/[n]): ') != '':
+            # Let's define a new lightcurve ojbect where we have flattened the light curve
+            lc_f_unnormalised = lc.flatten()
+            lc_f_unnormalised.flux = lc_f_unnormalised.flux * lc_normalisation
+            lc_f_unnormalised.flux_err = lc_f_unnormalised.flux_err * lc_normalisation
+
+            mjd_time_flattened = lc_f_unnormalised.time.mjd - lc_f_unnormalised.time[0].mjd
+            print(target_identifier, 'sector', sector_number, 'lightcurve flattened')
+            
+            plt.figure(figsize=figure_size)
+            plt.errorbar(mjd_time_flattened, lc_f_unnormalised.flux, lc_f_unnormalised.flux_err.data, fmt='.', ecolor='LightGrey', label='Unbinned Unnormalised Flattened Data')
+            
+            if FLATTEN_BIN:
+                if input('Bin flattened light curve? (y/[n]): ') != '':
+                    lc_fbin = lc_f_unnormalised.bin(time_bin_size = BINNING)
+                    mjd_time_flattened_binned = lc_fbin.time.mjd - lc_fbin.time[0].mjd
+                    print(target_identifier, 'sector', sector_number, 'lightcurve binned and flattened')
+                    
+                    plt.errorbar(mjd_time_flattened_binned, lc_fbin.flux, lc_fbin.flux_err.data, fmt='.', ecolor='LightGrey', label='Binned Flattened Data\n{0} d'.format(BINNING))
+        
+            
+            plt.xlabel('Time [days]')
+            plt.ylabel('Flux')
+            plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+            plt.legend()
+            #if y_limits != False:
+            #    plt.ylim(y_limits[0],y_limits[1])
+            plt.show()
+            
+            if FLATTEN_SEQ_BIN:
+                if input('Sequentially bin the lightcurve? (y/[n]): ') != '':
+                    total_data_points = len(lc_f_unnormalised.flux)
+                    total_duration = lc_f_unnormalised.time[-1].mjd - lc_f_unnormalised.time[0].mjd
+                    max_number_of_bins = total_data_points // 100
+                    #mean_errors = []
+                    
+                    binnings = []
+                    shot_noises = []
+                    bin_errors = []
+                    BASE = 2
+                    min_power = math.log(0.05, BASE)
+                    max_power = math.log(total_duration, BASE)
+                    for sequential_binning in np.logspace(min_power, max_power, 10, base=BASE):
+                        lc_f_seq_bin = lc_f_unnormalised.bin(time_bin_size = sequential_binning)
+                        no_of_bins = total_duration / sequential_binning
+                        data_points_per_bin = total_data_points / no_of_bins
+                        
+                        lc_f_seq_bin.flux[-1] = np.nan
+                        lc_f_seq_bin.flux_err[-1] = np.nan
+        
+                        
+                        #mjd_time_flattened_seq_binned = lc_f_seq_bin.time.mjd - lc_f_seq_bin.time[0].mjd
+                        #fig = plt.figure(figsize=figure_size)
+                        #plt.errorbar(mjd_time_flattened_seq_binned, lc_f_seq_bin.flux, lc_f_seq_bin.flux_err.data, fmt='.', ecolor='LightGrey', label='Binned Flattened Data\n{0} d'.format(round(sequential_binning,2)))
+                        #plt.xlabel('Time [days]')
+                        #plt.ylabel('Normalized Flux')
+                        #plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                        #plt.legend()
+                        #plt.show()
+                        
+                        
+                        binnings.append(sequential_binning)
+                        
+                        mean_flux = np.nanmean(lc_f_seq_bin.flux)
+                        mean_error = np.nanmean(lc_f_seq_bin.flux_err)
+                        #std_flux = np.nanstd(lc_f_seq_bin.flux)
+                        #std_error = np.nanstd(lc_f_seq_bin.flux_err)
+                        
+                        shot_noise = 1 / math.sqrt(data_points_per_bin)
+                        
+                        bin_errors.append(mean_error)
+                        shot_noises.append(shot_noise)        
+                    
+                        print('Bin Size: ', sequential_binning)
+                        print('Average Error on Bins: ', mean_error)
+                        print('Expected Shot Noise: ', shot_noise,'\n ')
+                        
+                        
+                    fig = plt.figure(figsize=figure_size)
+                    plt.scatter(binnings, shot_noises)
+                    plt.xlabel('Binning [days]')
+                    plt.ylabel('Expected Shot Noise')
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    #plt.xscale('log')
+                    #plt.yscale('log')
+                    plt.show()
+                    
+                    fig = plt.figure(figsize=figure_size)
+                    plt.scatter(binnings, bin_errors)
+                    plt.xlabel('Binning [days]')
+                    plt.ylabel('Error on Each Bin')
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    #plt.xscale('log')
+                    #plt.yscale('log')
+                    plt.show()
+                    
+                    fig = plt.figure(figsize=figure_size)
+                    plt.scatter(binnings, bin_errors, label='Mean Bin Error')
+                    plt.scatter(binnings, shot_noises, label = 'Expected Shot Noise')
+                    plt.xlabel('Binning [days]')
+                    plt.ylabel('Noise')
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    plt.legend()
+                    plt.show()
+                    
+                    fig = plt.figure(figsize=figure_size)
+                    plt.scatter(binnings, bin_errors, label='Mean Bin Error')
+                    plt.scatter(binnings, shot_noises, label = 'Expected Shot Noise')
+                    plt.xlabel('Binning [days]')
+                    plt.ylabel('Noise')
+                    plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                    plt.xscale('log')
+                    plt.yscale('log')
+                    plt.legend()
+                    plt.show()
+            
+            
+    
+    if COMPONENT_MASK:
+        if input('Mask components of observation? (y/[n]): ') != '':
+            #mask the mask
+            mask_locations = []
+            for mask_objects in secondary_masks:
+                if mask_objects[0] == observations_to_analyse[observation_index][0]:
+                    #get the list of mask timings for this observation
+                    mask_lists = mask_objects[1]
+            
+            one_mask_lightcurve = lc.copy()
+            
+            periodograms = []
+            for mask_locations in mask_lists:
+                # remove the features in the one mask lightcurve for this current list of masking locations
+                #generate Lomb-Scargle periodogram for the newly masked light curve
+                #fold newly masked lightcurve by Lomb-Scargle max power period
+                
+                if len(mask_locations) >=2:
+                    mask_label = ", Masked"
+                    masked_fluxes = list(lc.flux)
+                    masked_flux_errors = list(lc.flux_err)
+                    masked_times = list(lc.time.mjd)
+                    mask_index = -2
+                    
+                    #loop iterates from the last mask to the first so that this code can deal with removing entries from the flux list if desired
+                    for j in range(len(mjd_time) - 1,-1,-1):
+                        #for times within the mask, set the fluxes and errors to nothing, essentially removes it from the list while preserving the shape of the list
+                        if mjd_time[j] >= mask_locations[mask_index] and mjd_time[j] <= mask_locations[mask_index + 1]:
+                            lc.flux[j] = np.nan
+                            lc.flux_err[j] = np.nan
+                        #go to the next mask when the beginning of the period is reached and it is not the last (first) mask in the list
+                        elif mjd_time[j] < mask_locations[mask_index] and abs(mask_index) < len(mask_locations):
+                            mask_index -= 2
+                else:
+                    mask_label = ", Unmasked"
+                fig = plt.figure(figsize=figure_size)
+                plt.errorbar(mjd_time, lc.flux, lc.flux_err.data, fmt='.', ecolor='LightGrey',label='Unbinned Data')
+                plt.title('{0}, Sector {1}{2}'.format(target_identifier,sector_number,mask_label))
                 plt.xlabel('Time [days]')
                 plt.ylabel('Normalized Flux')
+                #if y_limits != False:
+                #    plt.ylim(y_limits[0],y_limits[1])
                 plt.show()
-                day_counter += 1
-                previous_day_end_index = i
+        
+        
+                period_lower_lim = 0.001#input('Minimum period to fit? (default 1 day): ')
+                # if period_lower_lim == '':
+                #     period_lower_lim = 1
+                # else:
+                #     period_lower_lim = float(period_lower_lim)
+                period_upper_lim = input('Maximum period to fit? (default 7 days): ')
+                if period_upper_lim == '':
+                    period_upper_lim = 7
+                else:
+                    period_upper_lim = float(period_upper_lim)
+                    
+                linspaced_periods = np.linspace(period_lower_lim, period_upper_lim, 500)
+                
+                ls_pg = lk.periodogram.LombScarglePeriodogram.from_lightcurve(lc,period=linspaced_periods,nterms=FOURIER_TERMS,ls_method='chi2')
+                fig = plt.figure(figsize=figure_size)
+                plt.plot(ls_pg.period, ls_pg.power, label='Unbinned Data')
+        
+                ls_max_power_period = ls_pg.period_at_max_power
+                print(ls_max_power_period)
+                print(target_identifier, 'sector', sector_number, 'Lomb-Scargle periodogram generated')
+        
+                plt.xlabel('Period [Days]')
+                plt.xlim(0,period_upper_lim)
+                plt.ylabel('Lomb-Scargle Power')
+                plt.title('{0}, Sector {1} Lomb-Scargle Periodogram with {2} Fourier Term(s)'.format(target_identifier,sector_number,FOURIER_TERMS))
+                plt.legend()
+                plt.show()
+                
+                if FOLDING:
+                    period_vs_power = [ls_pg.period,ls_pg.power]
+                    folding_input = input('Fold lightcurve about strongest period? (y/[n]): ')
+                    if  folding_input == 'y':
+                        print(ls_max_power_period)
+                        #fig = plt.figure(figsize=figure_size)
+                        lc.fold(ls_max_power_period).scatter(label='Period: {0:.4g}'.format(ls_max_power_period))
+                        plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                        plt.show()
+                    elif folding_input != '':
+                        folding_period = float(folding_input)
+                        lc.fold(folding_period).scatter(label='Period: {0:.4g}'.format(folding_period))
+                        plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                        plt.show()
+                            
+                            # fig = plt.figure(figsize=figure_size)
+                            # plt.errorbar(lc_fold.time.value, lc_fold.flux, lc_fold.flux_err.data, fmt='.', ecolor='green', label='Period: {0:.4g}'.format(bls_max_power_period))
+                            # plt.xlabel('Phase [JD]')
+                            # plt.ylabel('Normalised Flux')
+                            # plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
+                            # plt.legend()
+                            # plt.show() 
+                
+                # if len(periodograms) > 0:
+                #     previous_pg_len = len(periodograms[-1].power)
+                #     current_pg_len = len(ls_pg.power)
+                #     if previous_pg_len > current_pg_len:
+                #         minimum_len = current_pg_len
+                #     else:
+                #         minimum_len = previous_pg_len
+                #     pg_power_diff = ls_pg.power[:minimum_len] - periodograms[-1].power[:minimum_len]
+                    
+                #     fig = plt.figure(figsize=figure_size)
+                #     plt.plot(ls_pg.period[:minimum_len], pg_power_diff, label='Unbinned Data')
+        
+                #     plt.xlabel('Period [Days]')
+                    
+                #     plt.xlim(0,7)
+                #     plt.ylabel('Lomb-Scargle Power')
+                #     plt.title('{0}, Sector {1} Lomb-Scargle Periodogram Difference from Previous'.format(target_identifier,sector_number))
+                #     plt.legend()
+                #     plt.show()
+                
+                # periodograms.append(ls_pg)
+        
+        
+        
+                #unmask the lightcurve back to its initial masking
+                lc.flux = one_mask_lightcurve.flux
+                lc.flux_err = one_mask_lightcurve.flux_err
 
-    
-    
-    if input('Flatten light curve? (y/[n]): ') != '':
-        # Let's define a new lightcurve ojbect where we have flattened the light curve
-        lc_f = lc.flatten()
-        mjd_time_flattened = lc_f.time.mjd - lc_f.time[0].mjd
-        print(target_identifier, 'sector', sector_number, 'lightcurve flattened')
-        
-        plt.figure(figsize=figure_size)
-        plt.errorbar(mjd_time_flattened, lc_f.flux, lc_f.flux_err.data, fmt='.', ecolor='LightGrey', label='Unbinned Flattened Data')
-        
-        if input('Bin flattened light curve? (y/[n]): ') != '':
-            lc_fbin = lc_f.bin(time_bin_size = BINNING)
-            mjd_time_flattened_binned = lc_fbin.time.mjd - lc_fbin.time[0].mjd
-            print(target_identifier, 'sector', sector_number, 'lightcurve binned and flattened')
-            
-            plt.errorbar(mjd_time_flattened_binned, lc_fbin.flux, lc_fbin.flux_err.data, fmt='.', ecolor='LightGrey', label='Binned Flattened Data\n{0} d'.format(BINNING))
 
-        
-        plt.xlabel('Time [days]')
-        plt.ylabel('Normalized Flux')
-        plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-        plt.legend()
-        #if y_limits != False:
-        #    plt.ylim(y_limits[0],y_limits[1])
-        plt.show()
-        
-        
-        if input('Sequentially bin the lightcurve? (y/[n]): ') != '':
-            total_data_points = len(lc_f.flux)
-            total_duration = lc_f.time[-1].mjd - lc_f.time[0].mjd
-            max_number_of_bins = total_data_points // 100
-            #mean_errors = []
-            
-            binnings = []
-            shot_noises = []
-            bin_errors = []
-            BASE = 1.5
-            min_power = math.log(0.05, BASE)
-            max_power = math.log(total_duration, BASE)
-            for sequential_binning in np.logspace(min_power,max_power,10,base=BASE):#np.linspace(1, max_number_of_bins,10):
-                lc_f_seq_bin = lc_f.bin(time_bin_size = sequential_binning)
-                no_of_bins = total_duration / sequential_binning
-                data_points_per_bin = total_data_points / no_of_bins
-                lc_f_seq_bin.flux[-1] = np.nan
-                lc_f_seq_bin.flux_err[-1] = np.nan
-                #lc_f_seq_bin.flux = lc_f_seq_bin.flux[:-1]
-                #lc_f_seq_bin.flux_err = lc_f_seq_bin.flux_err[:-1]
-                
-                #mjd_time_flattened_seq_binned = lc_f_seq_bin.time.mjd - lc_f_seq_bin.time[0].mjd
-                
-                #plt.errorbar(mjd_time_flattened_seq_binned, lc_f_seq_bin.flux, lc_f_seq_bin.flux_err.data, fmt='.', ecolor='LightGrey', label='Binned Flattened Data\n{0} d'.format(round(sequential_binning,2)))
-                #plt.xlabel('Time [days]')
-                #plt.ylabel('Normalized Flux')
-                #plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-                #plt.legend()
-                #plt.show()
-                
-                
-                binnings.append(sequential_binning)
-                
-                mean_flux = np.nanmean(lc_f_seq_bin.flux)
-                mean_error = np.nanmean(lc_f_seq_bin.flux_err)
-                #std_flux = np.nanstd(lc_f_seq_bin.flux)
-                #std_error = np.nanstd(lc_f_seq_bin.flux_err)
-
-                shot_noise = 1 / math.sqrt(data_points_per_bin)
-                
-                bin_errors.append(mean_error)
-                shot_noises.append(shot_noise)        
-            
-                print('Bin Size: ', sequential_binning)
-                print('Average Error on Bins: ', mean_error)
-                print('Expected Shot Noise: ', shot_noise,'\n ')
-                
-                
-            fig = plt.figure(figsize=figure_size)
-            plt.scatter(binnings, shot_noises)
-            plt.xlabel('Binning [days]')
-            plt.ylabel('Expected Shot Noise')
-            plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-            #plt.xscale('log')
-            #plt.yscale('log')
-            plt.show()
-            
-            fig = plt.figure(figsize=figure_size)
-            plt.scatter(binnings, bin_errors)
-            plt.xlabel('Binning [days]')
-            plt.ylabel('Error on Each Bin')
-            plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-            #plt.xscale('log')
-            #plt.yscale('log')
-            plt.show()
-            
-            fig = plt.figure(figsize=figure_size)
-            plt.scatter(binnings, bin_errors)
-            plt.scatter(binnings, shot_noises)
-            plt.xlabel('Binning [days]')
-            plt.ylabel('Error on Each Bin')
-            plt.title('{0}, Sector {1}'.format(target_identifier,sector_number))
-            plt.xscale('log')
-            plt.yscale('log')
-            plt.show()
-            
-            
-    
-    
-    
-    #mask the mask
-    mask_locations = []
-    for mask_objects in secondary_masks:
-        if mask_objects[0] == observations_to_analyse[observation_index][0]:
-            #get the list of mask timings for this observation
-            mask_lists = mask_objects[1]
-    
-    one_mask_lightcurve_flux = lc.flux
-    print(one_mask_lightcurve_flux)
-    one_mask_lightcurve_flux_err = lc.flux_err
-    
-    for mask_locations in mask_lists:
-        # remove the features in the one mask lightcurve for this current list of masking locations
-        #generate Lomb-Scargle periodogram for the newly masked light curve
-        #fold newly masked lightcurve by Lomb-Scargle max power period
-        
-        if len(mask_locations) >=2:
-            mask_label = ", Masked"
-            masked_fluxes = list(lc.flux)
-            masked_flux_errors = list(lc.flux_err)
-            masked_times = list(lc.time.mjd)
-            mask_index = -2
-            
-            #loop iterates from the last mask to the first so that this code can deal with removing entries from the flux list if desired
-            for j in range(len(mjd_time) - 1,-1,-1):
-                #for times within the mask, set the fluxes and errors to nothing, essentially removes it from the list while preserving the shape of the list
-                if mjd_time[j] >= mask_locations[mask_index] and mjd_time[j] <= mask_locations[mask_index + 1]:
-                    lc.flux[j] = np.nan
-                    lc.flux_err[j] = np.nan
-                #go to the next mask when the beginning of the period is reached and it is not the last (first) mask in the list
-                elif mjd_time[j] < mask_locations[mask_index] and abs(mask_index) < len(mask_locations):
-                    mask_index -= 2
-        else:
-            mask_label = ", Unmasked"
-        fig = plt.figure(figsize=figure_size)
-        plt.errorbar(mjd_time, lc.flux, lc.flux_err.data, fmt='.', ecolor='LightGrey',label='Unbinned Data')
-        plt.show()
-        
-        lc.replace_column('flux', one_mask_lightcurve_flux)
-        print(lc.flux)
-        print(one_mask_lightcurve_flux == lc.flux)
-        lc.replace_column('flux_err', one_mask_lightcurve_flux_err)
         
         
         
